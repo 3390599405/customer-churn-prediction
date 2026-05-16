@@ -3,11 +3,36 @@ import pandas as pd
 import numpy as np
 import joblib
 
-st.set_page_config(page_title="客户流失预测", layout="wide")
+st.set_page_config(page_title="客户流失预测", layout="wide", initial_sidebar_state="collapsed")
+
+# 手机端自适应 CSS
+st.markdown("""
+<style>
+    /* 移动端适配 */
+    @media (max-width: 768px) {
+        .stMainBlockContainer { padding: 1rem 0.5rem !important; }
+        .row-widget.stColumns { flex-direction: column !important; gap: 0.3rem !important; }
+        .row-widget.stColumns > div { width: 100% !important; flex: none !important; }
+        div[data-testid="column"] { width: 100% !important; min-width: 100% !important; }
+        .st-emotion-cache-1jicfl2 { padding: 1rem 0.5rem !important; }
+        h1 { font-size: 1.5rem !important; }
+        h2, h3 { font-size: 1.1rem !important; }
+        div[data-testid="metric-container"] { padding: 0.5rem !important; }
+    }
+    /* 卡片风格 */
+    div[data-testid="metric-container"] {
+        background: #f0f2f6; border-radius: 10px; padding: 1rem; text-align: center;
+    }
+    .st-emotion-cache-1r4qj8v { padding: 1rem 0.5rem; }
+    @media (prefers-color-scheme: dark) {
+        div[data-testid="metric-container"] { background: #262730; }
+    }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🛒 电商客户流失风险预测")
 st.markdown("输入客户信息，预测流失概率并获取干预建议")
 
-# 加载模型
 @st.cache_resource
 def load_model():
     data = joblib.load('churn_model.pkl')
@@ -15,7 +40,6 @@ def load_model():
 
 model, scaler, feature_cols = load_model()
 
-# 输入区
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -35,22 +59,18 @@ with col3:
     contract = st.selectbox("合同类型", ["Monthly", "Annual"])
 
 if st.button("🚀 预测流失风险", type="primary", use_container_width=True):
-    # 构造特征
     input_data = pd.DataFrame([[age, subscription, logins, last_purchase,
                                 app_usage, spending, discount, support_calls,
                                 satisfaction, 1 if contract == "Monthly" else 0]],
                               columns=feature_cols)
 
-    # 预测
     scaled = scaler.transform(input_data)
     prob = model.predict_proba(scaled)[0, 1]
 
-    # 结果展示
     st.markdown("---")
     st.subheader("预测结果")
 
     res_col1, res_col2, res_col3 = st.columns(3)
-
     res_col1.metric("流失概率", f"{prob:.1%}")
     pred_label = "⚠️ 流失" if prob >= 0.3 else "✅ 未流失"
     res_col2.metric("预测结果", pred_label)
@@ -62,7 +82,6 @@ if st.button("🚀 预测流失风险", type="primary", use_container_width=True
         risk = "🟢 低风险"
     res_col3.metric("风险等级", risk)
 
-    # 业务建议
     st.markdown("---")
     st.subheader("📋 干预建议")
     if prob >= 0.7:
