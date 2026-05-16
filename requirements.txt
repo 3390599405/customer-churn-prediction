@@ -5,3 +5,5 @@ seaborn
 plotly
 scikit-learn
 imbalanced-learn
+streamlit>=1.28
+joblib>=1.2
