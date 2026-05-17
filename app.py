@@ -354,20 +354,21 @@ else:
 
         # ── 自动匹配 ──
         auto_map = {}
-        manual_list = []
-        for feat in [c for c in feature_cols if c != 'Contract_Type_Monthly']:
-            m = fuzzy_find(COLUMN_ALIASES.get(feat, [feat]), upload_cols)
+        # 把 Contract_Type 也加入自动匹配
+        check_features = [c for c in feature_cols if c != 'Contract_Type_Monthly'] + ['Contract_Type']
+        for feat in check_features:
+            aliases = COLUMN_ALIASES.get(feat, [feat]) + [feat]
+            m = fuzzy_find(aliases, upload_cols)
             if m: auto_map[feat] = m
-            else: manual_list.append(feat)
 
-        # Contract_Type 特殊处理
-        ct_col = fuzzy_find(COLUMN_ALIASES.get('CustomerID', []) + ['Contract_Type', 'contract_type', '合同类型', '合同'], upload_cols)
+        manual_list = [f for f in check_features if f not in auto_map]
+
         ct_direct = 'Contract_Type_Monthly' if 'Contract_Type_Monthly' in upload_cols else None
         cid_col = fuzzy_find(COLUMN_ALIASES.get('CustomerID', []), upload_cols)
 
-        # 自动匹配摘要
-        if auto_map:
-            st.markdown(f"<div style='font-size:.85rem;opacity:.6;margin-bottom:.5rem;'>✅ 已自动匹配 {len(auto_map)} 列</div>", unsafe_allow_html=True)
+        matched_count = len([k for k in auto_map if k != 'Contract_Type'])
+        if matched_count:
+            st.markdown(f"<div style='font-size:.85rem;opacity:.6;margin-bottom:.5rem;'>✅ 已自动匹配 {matched_count} 列</div>", unsafe_allow_html=True)
 
         # ── 手动映射 ──
         if manual_list:
@@ -376,28 +377,21 @@ else:
                 default_val = st.session_state.batch_mapping.get(feat, "（请选择）")
                 opts = ["（请选择）"] + upload_cols
                 idx = opts.index(default_val) if default_val in opts else 0
-                sel = st.selectbox(f"「{feat}」对应哪一列？", opts, index=idx, key=f"bm_{feat}")
+                label = "「合同类型」对应哪一列？(Monthly/Annual)" if feat == 'Contract_Type' else f"「{feat}」对应哪一列？"
+                sel = st.selectbox(label, opts, index=idx, key=f"bm_{feat}")
                 if sel != "（请选择）":
                     st.session_state.batch_mapping[feat] = sel
 
-        # ── 合同列处理 ──
-        if not ct_direct and 'Contract_Type' not in auto_map and 'Contract_Type' not in st.session_state.batch_mapping:
-            ct_opts = ["（请选择）"] + upload_cols
-            ct_default = st.session_state.batch_mapping.get('Contract_Type', "（请选择）")
-            ct_idx = ct_opts.index(ct_default) if ct_default in ct_opts else 0
-            ct_sel = st.selectbox("「合同类型」对应哪一列？(Monthly/Annual 或 月合同/年合同)", ct_opts, index=ct_idx, key="bm_contract")
-            if ct_sel != "（请选择）":
-                st.session_state.batch_mapping['Contract_Type'] = ct_sel
-
         # ── 检查完整度 ──
         all_mapped = {}
-        for feat in [c for c in feature_cols if c != 'Contract_Type_Monthly']:
+        for feat in check_features:
             if feat in auto_map: all_mapped[feat] = auto_map[feat]
             elif feat in st.session_state.batch_mapping and st.session_state.batch_mapping[feat] != "（请选择）":
                 all_mapped[feat] = st.session_state.batch_mapping[feat]
 
-        contract_ready = ct_direct or 'Contract_Type' in auto_map or ('Contract_Type' in st.session_state.batch_mapping and st.session_state.batch_mapping['Contract_Type'] != "（请选择）")
-        all_ready = len(all_mapped) >= len([c for c in feature_cols if c != 'Contract_Type_Monthly']) and contract_ready
+        contract_ready = ct_direct or 'Contract_Type' in all_mapped
+        needed = [c for c in feature_cols if c != 'Contract_Type_Monthly']
+        all_ready = contract_ready and all(k in all_mapped for k in needed)
 
         if all_ready:
             st.markdown("---")
