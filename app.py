@@ -410,11 +410,14 @@ else:
                         elif feat in st.session_state.batch_mapping: fd[feat] = proc[st.session_state.batch_mapping[feat]]
                         elif feat == 'Contract_Type_Monthly':
                             src = ct_direct or auto_map.get('Contract_Type', st.session_state.batch_mapping.get('Contract_Type', ''))
-                            col_data = proc[src]
-                            if col_data.dtype in ['int64', 'float64', 'int32']:
-                                fd[feat] = col_data.astype(int)
+                            if src and src in proc.columns:
+                                col_data = proc[src]
+                                if col_data.dtype in ['int64', 'float64', 'int32']:
+                                    fd[feat] = col_data.astype(int)
+                                else:
+                                    fd[feat] = (col_data.astype(str).str.lower().str.strip().isin(['monthly', '月合同', '1', 'true', 'yes'])).astype(int)
                             else:
-                                fd[feat] = (col_data.astype(str).str.lower().str.strip().isin(['monthly', '月合同', '1', 'true', 'yes'])).astype(int)
+                                fd[feat] = 0
                     fd = fd[feature_cols]
 
                     scaled = scaler.transform(fd)
