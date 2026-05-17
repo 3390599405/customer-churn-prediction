@@ -10,35 +10,109 @@ st.set_page_config(page_title="ChurnGuard 客户流失预警", layout="wide", in
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
-    * { font-family: 'Inter', 'Microsoft YaHei', sans-serif; }
-    .hero {
-        background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-        padding: 2.5rem 2rem; border-radius: 20px; text-align: center;
-        color: white; margin-bottom: 2rem;
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&display=swap');
+
+    /* ═══ 亮色模式 — 天空蓝 ═══ */
+    @media (prefers-color-scheme: light) {
+        .stApp { background: linear-gradient(180deg, #e8f4f8 0%, #d0e8f0 40%, #b8dae8 100%) !important; }
+        * { font-family: 'Inter', 'Microsoft YaHei', sans-serif; color: #1a2a3a; }
+        h1, h2, h3, h4, h5 { color: #0d2137 !important; }
+        .hero {
+            background: linear-gradient(135deg, #5b9bd5, #4a89c0, #3a7aa8) !important;
+            padding: 2.5rem 2rem; border-radius: 20px; text-align: center;
+            color: white; margin-bottom: 2rem;
+        }
+        .hero h1 { font-size: 2.8rem; font-weight: 800; margin: 0; font-family: 'Playfair Display', serif; }
+        .hero p { font-size: 1.05rem; opacity: .85; margin-top: .5rem; }
+        .card {
+            background: rgba(255,255,255,.75); border: 1px solid rgba(255,255,255,.9);
+            border-radius: 14px; padding: 1.5rem; margin-bottom: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,.05); backdrop-filter: blur(8px);
+        }
+        .card h3 { margin: 0 0 .3rem 0; font-weight: 600; color: #0d2137; }
+        .card .sub { font-size: .8rem; opacity: .6; margin-bottom: 1rem; color: #4a6a8a; }
+        .result-card {
+            background: rgba(255,255,255,.8); border: 1px solid rgba(255,255,255,.9);
+            border-radius: 14px; padding: 1.2rem; text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,.04);
+        }
+        .result-card .value { font-size: 2.2rem; font-weight: 800; }
+        .result-card .label { font-size: .8rem; opacity: .6; text-transform: uppercase; letter-spacing: 1px; color: #4a6a8a; }
+        .risk-high .value { color: #d63031; }
+        .risk-mid .value { color: #e17055; }
+        .risk-low .value { color: #00b894; }
+        .report-header { border-left: 3px solid #5b9bd5; padding-left: 1rem; margin-bottom: 1.5rem; }
+        .report-header h2 { margin: 0; font-weight: 700; color: #0d2137; }
+        .report-header .meta { font-size: .8rem; opacity: .5; }
+        th, td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid rgba(0,0,0,.06); color: #1a2a3a; }
+        th { font-weight: 600; opacity: .7; font-size: .75rem; text-transform: uppercase; letter-spacing: .5px; }
+        .st-bw { background: rgba(255,255,255,.3); }
+        .stNumberInput label, .stSelectbox label { color: #1a2a3a !important; }
     }
-    .hero h1 { font-size: 2.8rem; font-weight: 800; margin: 0; }
-    .hero p { font-size: 1.05rem; opacity: .75; margin-top: .5rem; }
-    .card {
-        background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-        border-radius: 14px; padding: 1.5rem; margin-bottom: 1.5rem;
-        backdrop-filter: blur(4px);
+
+    /* ═══ 暗色模式 — 星空 ═══ */
+    @media (prefers-color-scheme: dark) {
+        .stApp {
+            background: linear-gradient(180deg, #0a0a1a 0%, #12122a 40%, #1a1a3a 100%) !important;
+            position: relative;
+        }
+        .stApp::before {
+            content: '';
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background-image:
+                radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,.4), transparent),
+                radial-gradient(1px 1px at 25% 45%, rgba(255,255,255,.3), transparent),
+                radial-gradient(1.5px 1.5px at 40% 10%, rgba(255,255,255,.5), transparent),
+                radial-gradient(1px 1px at 55% 60%, rgba(255,255,255,.3), transparent),
+                radial-gradient(1.5px 1.5px at 70% 25%, rgba(255,255,255,.4), transparent),
+                radial-gradient(1px 1px at 82% 70%, rgba(255,255,255,.3), transparent),
+                radial-gradient(1px 1px at 15% 80%, rgba(255,255,255,.25), transparent),
+                radial-gradient(1.5px 1.5px at 90% 40%, rgba(255,255,255,.35), transparent),
+                radial-gradient(1px 1px at 45% 85%, rgba(255,255,255,.2), transparent),
+                radial-gradient(1px 1px at 65% 50%, rgba(255,255,255,.3), transparent),
+                radial-gradient(1.5px 1.5px at 5% 55%, rgba(255,255,255,.4), transparent),
+                radial-gradient(1px 1px at 35% 35%, rgba(255,255,255,.25), transparent),
+                radial-gradient(1px 1px at 75% 15%, rgba(255,255,255,.3), transparent),
+                radial-gradient(1.5px 1.5px at 50% 50%, rgba(255,255,255,.15), transparent),
+                radial-gradient(1px 1px at 95% 80%, rgba(255,255,255,.2), transparent);
+            pointer-events: none; z-index: 0;
+        }
+        * { font-family: 'Inter', 'Microsoft YaHei', sans-serif; color: #e0e0e0; }
+        .hero {
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e) !important;
+            padding: 2.5rem 2rem; border-radius: 20px; text-align: center;
+            color: white; margin-bottom: 2rem; position: relative; z-index: 1;
+        }
+        .hero h1 { font-size: 2.8rem; font-weight: 800; margin: 0; font-family: 'Playfair Display', serif; }
+        .hero p { font-size: 1.05rem; opacity: .75; margin-top: .5rem; }
+        .card {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px; padding: 1.5rem; margin-bottom: 1.5rem;
+            backdrop-filter: blur(4px); position: relative; z-index: 1;
+        }
+        .card h3 { margin: 0 0 .3rem 0; font-weight: 600; color: #e0e0e0; }
+        .card .sub { font-size: .8rem; opacity: .5; margin-bottom: 1rem; }
+        .result-card {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px; padding: 1.2rem; text-align: center;
+            backdrop-filter: blur(4px); position: relative; z-index: 1;
+        }
+        .result-card .value { font-size: 2.2rem; font-weight: 800; }
+        .result-card .label { font-size: .8rem; opacity: .6; text-transform: uppercase; letter-spacing: 1px; }
+        .risk-high .value { color: #ff4757; }
+        .risk-mid .value { color: #ffa502; }
+        .risk-low .value { color: #2ed573; }
+        .report-header { border-left: 3px solid #7c4dff; padding-left: 1rem; margin-bottom: 1.5rem; }
+        .report-header h2 { margin: 0; font-weight: 700; }
+        .report-header .meta { font-size: .8rem; opacity: .5; }
+        th, td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,.06); }
+        th { font-weight: 600; opacity: .7; font-size: .75rem; text-transform: uppercase; letter-spacing: .5px; }
     }
-    .card h3 { margin: 0 0 .3rem 0; font-weight: 600; color: #e0e0e0; }
-    .card .sub { font-size: .8rem; opacity: .5; margin-bottom: 1rem; }
-    .result-card {
-        background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-        border-radius: 14px; padding: 1.2rem; text-align: center;
-        backdrop-filter: blur(4px);
-    }
-    .result-card .value { font-size: 2.2rem; font-weight: 800; }
-    .result-card .label { font-size: .8rem; opacity: .6; text-transform: uppercase; letter-spacing: 1px; }
-    .risk-high .value { color: #ff4757; }
-    .risk-mid .value { color: #ffa502; }
-    .risk-low .value { color: #2ed573; }
+
+    /* ═══ 通用 ═══ */
     .metric-row { display: flex; justify-content: space-between; padding: .5rem 0; border-bottom: 1px solid rgba(255,255,255,.05); }
     .metric-row .name { opacity: .7; }
     .metric-row .val { font-weight: 600; }
-    .metric-row .badge { font-size: .75rem; padding: 2px 10px; border-radius: 20px; }
     .badge-danger { background: rgba(255,71,87,.15); color: #ff4757; }
     .badge-warn { background: rgba(255,165,2,.15); color: #ffa502; }
     .badge-good { background: rgba(46,213,115,.15); color: #2ed573; }
@@ -48,12 +122,7 @@ st.markdown("""
         .row-widget.stColumns { flex-direction: column !important; gap: 0.3rem !important; }
         .row-widget.stColumns > div { width: 100% !important; flex: none !important; }
     }
-    .report-header { border-left: 3px solid #7c4dff; padding-left: 1rem; margin-bottom: 1.5rem; }
-    .report-header h2 { margin: 0; font-weight: 700; }
-    .report-header .meta { font-size: .8rem; opacity: .5; }
     table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-    th, td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,.06); }
-    th { font-weight: 600; opacity: .7; font-size: .75rem; text-transform: uppercase; letter-spacing: .5px; }
 </style>
 """, unsafe_allow_html=True)
 
