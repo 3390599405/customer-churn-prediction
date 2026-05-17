@@ -311,91 +311,240 @@ if mode == "单客户预测":
 # ═══════════════════════════════════════════════════
 else:
     st.markdown('<div class="card"><h3>📁 批量预测</h3><div class="sub">上传 CSV 或 Excel 文件，一次预测所有客户的流失概率</div>', unsafe_allow_html=True)
-    st.markdown("""
-    **文件格式要求：**
-    - 需包含以下列：`Age`, `Subscription_Duration_Months`, `Monthly_Logins`, `Last_Purchase_Days_Ago`,
-      `App_Usage_Time_Min`, `Monthly_Spend`, `Discount_Usage_Percentage`, `Customer_Support_Calls`,
-      `Satisfaction_Score`, `Contract_Type`（或 `Contract_Type_Monthly`）
-    - 可选列：`CustomerID`（用于标识客户）
-    - `Contract_Type` 值：`Monthly` 或 `Annual`
-    """)
+
+    # 常见列名别名（支持中英文、各种命名风格）
+    COLUMN_ALIASES = {
+        'Age': ['年龄', 'age', 'AGE', 'customer_age', 'Customer_Age'],
+        'Subscription_Duration_Months': ['订阅月数', 'subscription_duration_months', 'Subscription_Months',
+            'subscription_months', '订阅时长', 'subscription_duration', 'Subscription_Duration', 'tenure', 'Tenure',
+            '会员时长', '会员月数'],
+        'Monthly_Logins': ['月登录次数', 'monthly_logins', 'Monthly_Logins_Count', 'logins_per_month',
+            'Login_Frequency', 'login_frequency', '登录频率', '月登录数'],
+        'Last_Purchase_Days_Ago': ['距上次购买天数', 'last_purchase_days_ago', 'Days_Since_Last_Purchase',
+            'days_since_last_purchase', 'Recency', 'recency', '最近购买天数', '距上次购买'],
+        'App_Usage_Time_Min': ['App使用时长(分钟/天)', 'app_usage_time_min', 'App_Usage_Time',
+            'app_usage_time', 'Daily_Usage_Min', 'daily_usage_min', '使用时长', 'app使用时长', 'App使用时长'],
+        'Monthly_Spend': ['月消费金额($)', 'monthly_spend', 'Monthly_Spending', 'monthly_spending',
+            'Spend', 'spend', '月消费金额', '月消费', '消费金额'],
+        'Discount_Usage_Percentage': ['折扣使用比例', 'discount_usage_percentage', 'Discount_Rate',
+            'discount_rate', '折扣率', '折扣比例', 'discount_pct'],
+        'Customer_Support_Calls': ['近30天客服呼叫次数', 'customer_support_calls', 'Support_Calls',
+            'support_calls', '客服呼叫次数', '客服呼叫', 'customer_service_calls'],
+        'Satisfaction_Score': ['满意度评分', 'satisfaction_score', 'Satisfaction', 'satisfaction',
+            '满意度', 'CSAT', 'csat'],
+        'Contract_Type': ['合同类型', 'contract_type', 'Contract', 'contract', '合同'],
+        'Contract_Type_Monthly': ['contract_type_monthly', 'Contract_Type_Monthly'],
+        'CustomerID': ['CustomerID', 'customer_id', 'customerid', '用户ID', '客户ID', 'ID', 'id'],
+    }
+
+    def fuzzy_find_col(alias_list, upload_cols):
+        """在用户上传的列中模糊查找匹配"""
+        upload_lower = {c.lower().replace(' ', '').replace('-', '').replace('_', ''): c for c in upload_cols}
+        for alias in alias_list:
+            key = alias.lower().replace(' ', '').replace('-', '').replace('_', '')
+            if key in upload_lower:
+                return upload_lower[key]
+        # 子串匹配
+        for alias in alias_list:
+            alias_lower = alias.lower().replace(' ', '').replace('-', '').replace('_', '')
+            for ukey, ucol in upload_lower.items():
+                if alias_lower in ukey or ukey in alias_lower:
+                    return ucol
+        return None
+
+    def suggest_mapping(upload_cols, needed_col):
+        """推荐该特征匹配哪列"""
+        alias_list = COLUMN_ALIASES.get(needed_col, [needed_col])
+        matched = fuzzy_find_col(alias_list, upload_cols)
+        # 不在默认选项里也加上
+        all_opts = ["（请选择）"] + list(upload_cols)
+        default_idx = 0
+        if matched:
+            # 找到索引
+            try:
+                default_idx = all_opts.index(matched)
+            except ValueError:
+                default_idx = 0
+        return all_opts, default_idx
 
     uploaded_file = st.file_uploader("选择文件", type=["csv", "xlsx"], label_visibility="collapsed")
 
     if uploaded_file:
-        # 读取
         if uploaded_file.name.endswith('.csv'):
             batch_df = pd.read_csv(uploaded_file)
         else:
             batch_df = pd.read_excel(uploaded_file)
 
-        st.markdown(f"<div style='font-size:.85rem;opacity:.6;'>已读取 {len(batch_df)} 行 × {len(batch_df.columns)} 列</div>", unsafe_allow_html=True)
+        upload_cols = list(batch_df.columns)
+        st.markdown(f"<div style='font-size:.85rem;opacity:.6;'>已读取 {len(batch_df)} 行 × {len(upload_cols)} 列</div>", unsafe_allow_html=True)
 
         with st.expander("📄 预览数据"):
             st.dataframe(batch_df.head(10), use_container_width=True)
 
-        # 预处理
-        missing = [c for c in feature_cols if c not in batch_df.columns]
-        has_cid = 'CustomerID' in batch_df.columns
+        # ── 列名映射 ──
+        # 需要映射的特征（排除 Contract_Type 和 Contract_Type_Monthly 二选一）
+        needed_features = [c for c in feature_cols if c != 'Contract_Type_Monthly']
 
-        # 检查是否有 Contract_Type 但无 Contract_Type_Monthly
-        if 'Contract_Type_Monthly' not in batch_df.columns and 'Contract_Type' in batch_df.columns:
-            batch_df['Contract_Type_Monthly'] = (batch_df['Contract_Type'].str.lower().str.strip() == 'monthly').astype(int)
-            missing = [c for c in feature_cols if c not in batch_df.columns]
+        mapping = {}  # expected_col -> upload_col
+        auto_matched = {}
+        manual_needed = []
 
-        if missing:
-            st.error(f"文件中缺少以下必需列：{', '.join(missing)}")
-        else:
-            if st.button("🚀 批量预测", type="primary", use_container_width=True):
-                with st.spinner("正在预测..."):
-                    pred_df = batch_df[feature_cols].copy()
-                    scaled_batch = scaler.transform(pred_df)
-                    probs = model.predict_proba(scaled_batch)[:, 1]
+        # 自动匹配
+        for feat in needed_features:
+            alias_list = COLUMN_ALIASES.get(feat, [feat])
+            matched = fuzzy_find_col(alias_list, upload_cols)
+            if matched:
+                auto_matched[feat] = matched
+            else:
+                manual_needed.append(feat)
 
-                    # 构建结果表
-                    result = pd.DataFrame()
-                    if has_cid: result['CustomerID'] = batch_df['CustomerID']
-                    result['流失概率'] = probs.round(4)
-                    result['预测结果'] = np.where(probs >= 0.3, '可能流失', '相对稳定')
-                    result['风险等级'] = np.where(probs >= 0.7, '高风险', np.where(probs >= 0.3, '中风险', '低风险'))
-                    result['健康度评分'] = ((1 - probs) * 100).astype(int)
+        # Contract_Type 特殊处理
+        ct_matched = fuzzy_find_col(COLUMN_ALIASES.get('Contract_Type', []), upload_cols)
+        ct_direct = 'Contract_Type_Monthly' if 'Contract_Type_Monthly' in upload_cols else None
 
-                    # 展示统计
-                    st.markdown("---")
-                    st.markdown("### 📊 预测结果概览")
+        if manual_needed:
+            st.markdown("---")
+            st.markdown("#### 🔄 列名映射")
+            st.markdown("部分列名未识别，请手动选择对应的列：")
 
-                    stat1, stat2, stat3, stat4 = st.columns(4)
-                    with stat1: st.markdown(f'<div class="result-card risk-high"><div class="label">高风险</div><div class="value">{(probs>=0.7).sum()}</div></div>', unsafe_allow_html=True)
-                    with stat2: st.markdown(f'<div class="result-card risk-mid"><div class="label">中风险</div><div class="value">{((probs>=0.3)&(probs<0.7)).sum()}</div></div>', unsafe_allow_html=True)
-                    with stat3: st.markdown(f'<div class="result-card risk-low"><div class="label">低风险</div><div class="value">{(probs<0.3).sum()}</div></div>', unsafe_allow_html=True)
-                    with stat4: st.markdown(f'<div class="result-card"><div class="label">平均流失率</div><div class="value" style="color:#a78bfa;">{probs.mean():.1%}</div></div>', unsafe_allow_html=True)
+            mapping_container = st.container()
+            with mapping_container:
+                for feat in manual_needed:
+                    if feat == 'Contract_Type_Monthly':
+                        continue
+                    all_opts, default_idx = suggest_mapping(upload_cols, feat)
+                    sel = st.selectbox(f"「{feat}」对应哪一列？", all_opts, key=f"map_{feat}")
+                    if sel and sel != "（请选择）":
+                        mapping[feat] = sel
 
-                    # 风险分布柱状图
-                    risk_counts = pd.Series(np.where(probs >= 0.7, '高风险', np.where(probs >= 0.3, '中风险', '低风险'))).value_counts()
-                    for lvl in ['高风险', '中风险', '低风险']:
-                        if lvl not in risk_counts: risk_counts[lvl] = 0
-                    risk_counts = risk_counts[['高风险', '中风险', '低风险']]
-                    fig_bar = go.Figure(data=[
-                        go.Bar(name='', x=risk_counts.index, y=risk_counts.values,
-                               marker_color=['#f87171', '#fbbf24', '#34d399'],
-                               text=risk_counts.values, textposition='outside')
-                    ])
-                    fig_bar.update_layout(height=250, margin=dict(l=10, r=10, t=10, b=30), paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#ccc'))
-                    st.plotly_chart(fig_bar, use_container_width=True)
+            # Contract_Type 处理
+            if ct_matched:
+                mapping['Contract_Type'] = ct_matched
+            elif 'Contract_Type' not in mapping and 'Contract_Type_Monthly' not in upload_cols and 'Contract_Type_Monthly' not in mapping:
+                ct_opts = ["（请选择）"] + upload_cols
+                ct_sel = st.selectbox("「合同类型」对应哪一列？（Monthly/Annual 或 1/0）", ct_opts, key="map_contract")
+                if ct_sel and ct_sel != "（请选择）":
+                    mapping['Contract_Type'] = ct_sel
 
-                    # 展示结果表
-                    st.markdown("### 📋 预测详情")
-                    st.dataframe(result, use_container_width=True, hide_index=True)
+        # ── 检查映射是否完整并预测 ──
+        # 构建完整映射
+        final_mapping = {}
+        for feat in feature_cols:
+            if feat in auto_matched:
+                final_mapping[feat] = auto_matched[feat]
+            elif feat in mapping:
+                final_mapping[feat] = mapping[feat]
+            elif feat == 'Contract_Type_Monthly':
+                # 尝试从 Contract_Type 推导
+                if 'Contract_Type' in auto_matched:
+                    final_mapping['Contract_Type_Monthly_src'] = auto_matched['Contract_Type']
+                elif 'Contract_Type' in mapping:
+                    final_mapping['Contract_Type_Monthly_src'] = mapping['Contract_Type']
+                elif ct_direct:
+                    final_mapping[feat] = ct_direct
+            elif feat == 'Contract_Type':
+                continue  # 不需要直接匹配
+            else:
+                final_mapping[feat] = None
 
-                    # 下载
-                    csv_buffer = io.BytesIO()
-                    result.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
-                    st.download_button("📥 下载预测结果 (CSV)", data=csv_buffer.getvalue(), file_name="churn_predictions.csv", mime="text/csv", use_container_width=True)
+        missing = [k for k, v in final_mapping.items() if v is None and k != 'Contract_Type_Monthly_src']
+        if 'Contract_Type_Monthly_src' not in final_mapping and 'Contract_Type_Monthly' not in final_mapping and ct_matched is None and 'Contract_Type' not in mapping and 'Contract_Type' not in auto_matched:
+            pass  # 还没有选择合同列
 
-                    # 高危客户明细
-                    high_risk = result[result['风险等级'] == '高风险']
-                    if len(high_risk) > 0:
-                        st.markdown("### ⚠️ 高风险客户明细")
-                        st.dataframe(high_risk, use_container_width=True, hide_index=True)
+        mapped_ok = True
+        for feat in feature_cols:
+            if feat == 'Contract_Type':
+                continue
+            if feat == 'Contract_Type_Monthly':
+                # 有直接列 或 有 Contract_Type 映射即可
+                ok = (feat in auto_matched) or (feat in final_mapping) or ('Contract_Type_Monthly_src' in final_mapping) or (ct_direct)
+                if not ok:
+                    mapped_ok = False
+                    break
+            else:
+                if feat not in auto_matched and feat not in mapping:
+                    mapped_ok = False
+                    break
 
-                    st.caption("报告由 ChurnGuard AI 引擎自动生成 ｜ 基于随机森林 + SMOTE 模型，AUC=0.90")
+        if mapped_ok and st.button("🚀 批量预测", type="primary", use_container_width=True):
+            with st.spinner("正在预测..."):
+                process_df = batch_df.copy()
+
+                # 构建特征数据
+                feat_data = pd.DataFrame()
+                for feat in feature_cols:
+                    if feat in auto_matched:
+                        feat_data[feat] = process_df[auto_matched[feat]]
+                    elif feat in mapping:
+                        feat_data[feat] = process_df[mapping[feat]]
+                    elif feat == 'Contract_Type_Monthly':
+                        src = final_mapping.get('Contract_Type_Monthly_src')
+                        if src:
+                            # 尝试多种格式
+                            col_data = process_df[src]
+                            if col_data.dtype in ['int64', 'float64', 'int32', 'float32']:
+                                feat_data[feat] = col_data.astype(int)
+                            else:
+                                feat_data[feat] = (col_data.astype(str).str.lower().str.strip().isin(['monthly', '月合同', '1', 'true', 'yes'])).astype(int)
+                        elif ct_direct:
+                            feat_data[feat] = process_df[ct_direct]
+                        else:
+                            feat_data[feat] = 0
+                    elif feat == 'Contract_Type':
+                        continue
+                    else:
+                        feat_data[feat] = 0
+
+                # 确保列顺序正确
+                feat_data = feat_data[feature_cols]
+
+                # 标准化+预测
+                scaled_batch = scaler.transform(feat_data)
+                probs = model.predict_proba(scaled_batch)[:, 1]
+
+                # 结果
+                result = pd.DataFrame()
+                # 找客户ID列
+                cid_col = fuzzy_find_col(COLUMN_ALIASES.get('CustomerID', []), upload_cols)
+                if cid_col:
+                    result['CustomerID'] = batch_df[cid_col]
+                result['流失概率'] = probs.round(4)
+                result['预测结果'] = np.where(probs >= 0.3, '可能流失', '相对稳定')
+                result['风险等级'] = np.where(probs >= 0.7, '高风险', np.where(probs >= 0.3, '中风险', '低风险'))
+                result['健康度评分'] = ((1 - probs) * 100).astype(int)
+
+                # 统计
+                st.markdown("---")
+                st.markdown("### 📊 预测结果概览")
+                s1, s2, s3, s4 = st.columns(4)
+                with s1: st.markdown(f'<div class="result-card risk-high"><div class="label">高风险</div><div class="value">{(probs>=0.7).sum()}</div></div>', unsafe_allow_html=True)
+                with s2: st.markdown(f'<div class="result-card risk-mid"><div class="label">中风险</div><div class="value">{((probs>=0.3)&(probs<0.7)).sum()}</div></div>', unsafe_allow_html=True)
+                with s3: st.markdown(f'<div class="result-card risk-low"><div class="label">低风险</div><div class="value">{(probs<0.3).sum()}</div></div>', unsafe_allow_html=True)
+                with s4: st.markdown(f'<div class="result-card"><div class="label">平均流失率</div><div class="value" style="color:#a78bfa;">{probs.mean():.1%}</div></div>', unsafe_allow_html=True)
+
+                # 分布柱状图
+                risk_counts = pd.Series(np.where(probs >= 0.7, '高风险', np.where(probs >= 0.3, '中风险', '低风险'))).value_counts()
+                for lvl in ['高风险', '中风险', '低风险']:
+                    if lvl not in risk_counts: risk_counts[lvl] = 0
+                risk_counts = risk_counts[['高风险', '中风险', '低风险']]
+                fig_bar = go.Figure(data=[go.Bar(name='', x=risk_counts.index, y=risk_counts.values,
+                    marker_color=['#f87171', '#fbbf24', '#34d399'], text=risk_counts.values, textposition='outside')])
+                fig_bar.update_layout(height=250, margin=dict(l=10, r=10, t=10, b=30), paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#ccc'))
+                st.plotly_chart(fig_bar, use_container_width=True)
+
+                # 结果表
+                st.markdown("### 📋 预测详情")
+                st.dataframe(result, use_container_width=True, hide_index=True)
+
+                # 下载
+                csv_buffer = io.BytesIO()
+                result.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+                st.download_button("📥 下载预测结果 (CSV)", data=csv_buffer.getvalue(), file_name="churn_predictions.csv", mime="text/csv", use_container_width=True)
+
+                # 高风险客户
+                high_risk = result[result['风险等级'] == '高风险']
+                if len(high_risk) > 0:
+                    st.markdown("### ⚠️ 高风险客户明细")
+                    st.dataframe(high_risk, use_container_width=True, hide_index=True)
+
+                st.caption("报告由 ChurnGuard AI 引擎自动生成 ｜ 基于随机森林 + SMOTE 模型，AUC=0.90")
