@@ -338,10 +338,6 @@ else:
                 if ak in uk or uk in ak: return uc
         return None
 
-    # 存储列名映射到 session_state 持久化
-    if 'batch_mapping' not in st.session_state:
-        st.session_state.batch_mapping = {}
-
     uploaded_file = st.file_uploader("选择文件", type=["csv", "xlsx"], label_visibility="collapsed")
 
     if uploaded_file:
@@ -354,157 +350,138 @@ else:
         with st.expander("📄 预览数据"):
             st.dataframe(batch_df.head(10), use_container_width=True)
 
-        # ── 自动匹配 ──
+        # ── 自动匹配并预测 ──
         auto_map = {}
-        # 把 Contract_Type 也加入自动匹配
         check_features = [c for c in feature_cols if c != 'Contract_Type_Monthly'] + ['Contract_Type']
         for feat in check_features:
             aliases = COLUMN_ALIASES.get(feat, [feat]) + [feat]
             m = fuzzy_find(aliases, upload_cols)
             if m: auto_map[feat] = m
 
-        manual_list = [f for f in check_features if f not in auto_map]
-
         ct_direct = 'Contract_Type_Monthly' if 'Contract_Type_Monthly' in upload_cols else None
         cid_col = fuzzy_find(COLUMN_ALIASES.get('CustomerID', []), upload_cols)
+        unmatched = [f for f in check_features if f not in auto_map]
 
+        # 显示匹配状态
         matched_count = len([k for k in auto_map if k != 'Contract_Type'])
-        if matched_count:
-            st.markdown(f"<div style='font-size:.85rem;opacity:.6;margin-bottom:.5rem;'>✅ 已自动匹配 {matched_count} 列</div>", unsafe_allow_html=True)
+        status = f"✅ 已识别 {matched_count}/{len(check_features)} 列"
+        if unmatched:
+            status += f"  |  ⚠️ 未识别：{', '.join(unmatched)}（使用默认值）"
+        st.markdown(f"<div style='font-size:.85rem;opacity:.6;margin-bottom:.8rem;'>{status}</div>", unsafe_allow_html=True)
 
-        # ── 手动映射 ──
-        if manual_list:
-            st.markdown("#### 🔄 请选择以下未识别列的对应关系：")
-            for feat in manual_list:
-                default_val = st.session_state.batch_mapping.get(feat, "（请选择）")
-                opts = ["（请选择）"] + upload_cols
-                idx = opts.index(default_val) if default_val in opts else 0
-                label = "「合同类型」对应哪一列？(Monthly/Annual)" if feat == 'Contract_Type' else f"「{feat}」对应哪一列？"
-                sel = st.selectbox(label, opts, index=idx, key=f"bm_{feat}")
-                if sel != "（请选择）":
-                    st.session_state.batch_mapping[feat] = sel
+        # ── 直接预测（无需按钮）──
+        with st.spinner("正在预测..."):
+            proc = batch_df.copy()
+            fd = pd.DataFrame()
+            for feat in feature_cols:
+                if feat in auto_map: fd[feat] = proc[auto_map[feat]]
+                elif feat == 'Contract_Type_Monthly':
+                    src = ct_direct or auto_map.get('Contract_Type', '')
+                    if src and src in proc.columns:
+                        col_data = proc[src]
+                        if col_data.dtype in ['int64', 'float64', 'int32']: fd[feat] = col_data.astype(int)
+                        else: fd[feat] = (col_data.astype(str).str.lower().str.strip().isin(['monthly', '月合同', '1', 'true', 'yes'])).astype(int)
+                    else: fd[feat] = 0
+                else:
+                    default_val = df[feat].median() if feat in df.columns else 0
+                    fd[feat] = default_val
 
-        # ── 检查完整度 ──
-        all_mapped = {}
-        for feat in check_features:
-            if feat in auto_map: all_mapped[feat] = auto_map[feat]
-            elif feat in st.session_state.batch_mapping and st.session_state.batch_mapping[feat] != "（请选择）":
-                all_mapped[feat] = st.session_state.batch_mapping[feat]
+            fd = fd[feature_cols]
+            scaled = scaler.transform(fd)
+            probs = model.predict_proba(scaled)[:, 1]
 
-        contract_ready = ct_direct or 'Contract_Type' in all_mapped
-        needed = [c for c in feature_cols if c != 'Contract_Type_Monthly']
-        all_ready = contract_ready and all(k in all_mapped for k in needed)
+            # 构建结果
+            res = pd.DataFrame()
+            if cid_col: res['客户ID'] = proc[cid_col]
+            res['流失概率'] = (probs * 100).round(1).apply(lambda x: f"{x:.1f}%")
+            res['风险等级'] = np.where(probs >= 0.7, '🔴 高风险', np.where(probs >= 0.3, '🟡 中风险', '🟢 低风险'))
+            res['健康度'] = ((1 - probs) * 100).astype(int)
+            res['风险排序'] = probs
 
-        if all_ready:
+            # ═══ 报告 ═══
             st.markdown("---")
-            if st.button("🚀 批量预测", type="primary", use_container_width=True):
-                with st.spinner("正在预测..."):
-                    proc = batch_df.copy()
-                    fd = pd.DataFrame()
-                    for feat in feature_cols:
-                        if feat in auto_map: fd[feat] = proc[auto_map[feat]]
-                        elif feat in st.session_state.batch_mapping: fd[feat] = proc[st.session_state.batch_mapping[feat]]
-                        elif feat == 'Contract_Type_Monthly':
-                            src = ct_direct or auto_map.get('Contract_Type', st.session_state.batch_mapping.get('Contract_Type', ''))
-                            if src and src in proc.columns:
-                                col_data = proc[src]
-                                if col_data.dtype in ['int64', 'float64', 'int32']:
-                                    fd[feat] = col_data.astype(int)
-                                else:
-                                    fd[feat] = (col_data.astype(str).str.lower().str.strip().isin(['monthly', '月合同', '1', 'true', 'yes'])).astype(int)
-                            else:
-                                fd[feat] = 0
-                    fd = fd[feature_cols]
+            report_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+            st.markdown(f"""
+            <div class="report-header">
+                <h2>📄 批量客户流失风险评估报告</h2>
+                <div class="meta">共 {len(proc)} 条记录 ｜ 报告生成：{report_time} ｜ 模型：随机森林</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-                    scaled = scaler.transform(fd)
-                    probs = model.predict_proba(scaled)[:, 1]
+            # 1️⃣ 概览
+            st.markdown("### 1️⃣ 风险评分总览")
+            s1, s2, s3, s4 = st.columns(4)
+            with s1: st.markdown(f'<div class="result-card risk-high"><div class="label">🔴 高风险</div><div class="value">{(probs>=0.7).sum()}</div></div>', unsafe_allow_html=True)
+            with s2: st.markdown(f'<div class="result-card risk-mid"><div class="label">🟡 中风险</div><div class="value">{((probs>=0.3)&(probs<0.7)).sum()}</div></div>', unsafe_allow_html=True)
+            with s3: st.markdown(f'<div class="result-card risk-low"><div class="label">🟢 低风险</div><div class="value">{(probs<0.3).sum()}</div></div>', unsafe_allow_html=True)
+            with s4: st.markdown(f'<div class="result-card"><div class="label">平均流失率</div><div class="value" style="color:#a78bfa;">{probs.mean():.1%}</div></div>', unsafe_allow_html=True)
 
-                    # 构建结果
-                    res = pd.DataFrame()
-                    if cid_col: res['CustomerID'] = proc[cid_col]
-                    res['流失概率'] = (probs * 100).round(1).apply(lambda x: f"{x:.1f}%")
-                    res['风险等级'] = np.where(probs >= 0.7, '🔴 高风险', np.where(probs >= 0.3, '🟡 中风险', '🟢 低风险'))
-                    res['健康度'] = ((1 - probs) * 100).astype(int)
-                    res['风险排序'] = probs
+            rc = pd.Series(np.where(probs >= 0.7, '高风险', np.where(probs >= 0.3, '中风险', '低风险'))).value_counts()
+            for l in ['高风险', '中风险', '低风险']:
+                if l not in rc: rc[l] = 0
+            rc = rc[['高风险', '中风险', '低风险']]
+            fig = go.Figure(data=[go.Bar(name='', x=rc.index, y=rc.values, marker_color=['#f87171', '#fbbf24', '#34d399'], text=rc.values, textposition='outside')])
+            fig.update_layout(height=250, margin=dict(l=10, r=10, t=10, b=30), paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#ccc'))
+            st.plotly_chart(fig, use_container_width=True)
 
-                    # ═══ 1️⃣ 风险评分总览 ═══
-                    st.markdown("---")
-                    st.markdown("### 📊 预测结果概览")
-                    s1, s2, s3, s4 = st.columns(4)
-                    with s1: st.markdown(f'<div class="result-card risk-high"><div class="label">🔴 高风险</div><div class="value">{(probs>=0.7).sum()}</div></div>', unsafe_allow_html=True)
-                    with s2: st.markdown(f'<div class="result-card risk-mid"><div class="label">🟡 中风险</div><div class="value">{((probs>=0.3)&(probs<0.7)).sum()}</div></div>', unsafe_allow_html=True)
-                    with s3: st.markdown(f'<div class="result-card risk-low"><div class="label">🟢 低风险</div><div class="value">{(probs<0.3).sum()}</div></div>', unsafe_allow_html=True)
-                    with s4: st.markdown(f'<div class="result-card"><div class="label">平均流失率</div><div class="value" style="color:#a78bfa;">{probs.mean():.1%}</div></div>', unsafe_allow_html=True)
+            # 2️⃣ 风险因子分布
+            st.markdown("### 2️⃣ 整体风险因子分布")
+            hr = probs >= 0.7
+            if hr.sum() > 0:
+                hr_df = proc[hr].copy()
+                lr_df = proc[~hr].copy()
+                factors_analysis = [
+                    ("客服呼叫次数", 'Customer_Support_Calls'),
+                    ("距上次购买天数", 'Last_Purchase_Days_Ago'),
+                    ("月消费金额", 'Monthly_Spend'),
+                    ("订阅时长", 'Subscription_Duration_Months'),
+                    ("月登录次数", 'Monthly_Logins'),
+                ]
+                fhtml = "<table><thead><tr><th>指标</th><th>高风险客户均值</th><th>低风险客户均值</th><th>差异</th></tr></thead><tbody>"
+                for fname, fcol in factors_analysis:
+                    if fcol in hr_df.columns and fcol in lr_df.columns:
+                        hv = hr_df[fcol].mean()
+                        lv = lr_df[fcol].mean()
+                        diff = "🔴 偏高" if hv > lv * 1.2 else "🟢 正常"
+                        fhtml += f"<tr><td>{fname}</td><td>{hv:.1f}</td><td>{lv:.1f}</td><td>{diff}</td></tr>"
+                fhtml += "</tbody></table>"
+                st.markdown(fhtml, unsafe_allow_html=True)
 
-                    # 分布图
-                    rc = pd.Series(np.where(probs >= 0.7, '高风险', np.where(probs >= 0.3, '中风险', '低风险'))).value_counts()
-                    for l in ['高风险', '中风险', '低风险']:
-                        if l not in rc: rc[l] = 0
-                    rc = rc[['高风险', '中风险', '低风险']]
-                    fig = go.Figure(data=[go.Bar(name='', x=rc.index, y=rc.values,
-                        marker_color=['#f87171', '#fbbf24', '#34d399'], text=rc.values, textposition='outside')])
-                    fig.update_layout(height=250, margin=dict(l=10, r=10, t=10, b=30), paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#ccc'))
-                    st.plotly_chart(fig, use_container_width=True)
+            # ═══ 3️⃣ 详细预测结果表 ═══
+            st.markdown("### 3️⃣ 客户预测明细")
+            display_cols = [c for c in res.columns if c != '风险排序']
+            st.dataframe(res[display_cols].sort_values('健康度'), use_container_width=True, hide_index=True)
 
-                    # ═══ 2️⃣ 风险因子分析（TOP 因子）═══
-                    st.markdown("### 2️⃣ 整体风险因子分布")
-                    st.markdown("分析所有客户中，哪些指标与高风险客户关联最强。")
-                    hr = (probs >= 0.7)
-                    if hr.sum() > 0:
-                        hr_df = proc[hr].copy()
-                        lr_df = proc[~hr].copy()
-                        factors_analysis = [
-                            ("客服呼叫次数", 'Customer_Support_Calls'),
-                            ("距上次购买天数", 'Last_Purchase_Days_Ago'),
-                            ("月消费金额", 'Monthly_Spend'),
-                            ("订阅时长", 'Subscription_Duration_Months'),
-                            ("月登录次数", 'Monthly_Logins'),
-                        ]
-                        fhtml = "<table><thead><tr><th>指标</th><th>高风险客户均值</th><th>低风险客户均值</th><th>差异</th></tr></thead><tbody>"
-                        for fname, fcol in factors_analysis:
-                            if fcol in hr_df.columns and fcol in lr_df.columns:
-                                hv = hr_df[fcol].mean()
-                                lv = lr_df[fcol].mean()
-                                diff = "🔴 偏高" if hv > lv * 1.2 else "🟢 正常"
-                                fhtml += f"<tr><td>{fname}</td><td>{hv:.1f}</td><td>{lv:.1f}</td><td>{diff}</td></tr>"
-                        fhtml += "</tbody></table>"
-                        st.markdown(fhtml, unsafe_allow_html=True)
+            # ═══ 4️⃣ 高风险客户 ═══
+            if hr.sum() > 0:
+                st.markdown(f"### 4️⃣ ⚠️ 高风险客户名单（共 {hr.sum()} 人）")
+                hr_res = res[hr].sort_values('健康度')
+                st.dataframe(hr_res[display_cols], use_container_width=True, hide_index=True)
 
-                    # ═══ 3️⃣ 详细预测结果表 ═══
-                    st.markdown("### 3️⃣ 客户预测明细")
-                    display_cols = [c for c in res.columns if c != '风险排序']
-                    st.dataframe(res[display_cols].sort_values('健康度'), use_container_width=True, hide_index=True)
+                # 单个高风险客户详情展开
+                st.markdown("##### 高风险客户详情")
+                top_n = min(5, hr.sum())
+                hr_top = proc[hr].head(top_n)
+                for idx in range(len(hr_top)):
+                    row = hr_top.iloc[idx]
+                    p = probs[hr][idx]
+                    with st.expander(f"#{idx+1} {' - '.join([str(row.get(c, f'客户{idx}')) for c in ([cid_col] if cid_col else [])])}  |  流失概率 {p:.1%}"):
+                        r1, r2 = st.columns(2)
+                        with r1:
+                            st.markdown(f"- 年龄：{row.get('Age','—')} | 订阅：{row.get('Subscription_Duration_Months','—')}个月 | 登录：{row.get('Monthly_Logins','—')}次/月")
+                            st.markdown(f"- 消费：${row.get('Monthly_Spend','—')} | 距上次购买：{row.get('Last_Purchase_Days_Ago','—')}天")
+                        with r2:
+                            st.markdown(f"- 客服呼叫：{row.get('Customer_Support_Calls','—')}次 | App使用：{row.get('App_Usage_Time_Min','—')}分钟")
+                            st.markdown(f"- 满意度：{row.get('Satisfaction_Score','—')}/5 | 折扣率：{row.get('Discount_Usage_Percentage','—')}")
+                        if p >= 0.7:
+                            st.error("**建议**：专属客服回访 + 大额优惠券，48小时内联系")
 
-                    # ═══ 4️⃣ 高风险客户 ═══
-                    if hr.sum() > 0:
-                        st.markdown(f"### 4️⃣ ⚠️ 高风险客户名单（共 {hr.sum()} 人）")
-                        hr_res = res[hr].sort_values('健康度')
-                        st.dataframe(hr_res[display_cols], use_container_width=True, hide_index=True)
+            # ═══ 5️⃣ 下载 ═══
+            csv_buf = io.BytesIO()
+            dl = res[display_cols].copy()
+            dl.columns = [c.replace('\n','') for c in dl.columns]
+            dl.to_csv(csv_buf, index=False, encoding='utf-8-sig')
+            st.download_button("📥 下载完整预测结果 (CSV)", data=csv_buf.getvalue(), file_name="churn_predictions.csv", mime="text/csv", use_container_width=True)
 
-                        # 单个高风险客户详情展开
-                        st.markdown("##### 高风险客户详情")
-                        top_n = min(5, hr.sum())
-                        hr_top = proc[hr].head(top_n)
-                        for idx in range(len(hr_top)):
-                            row = hr_top.iloc[idx]
-                            p = probs[hr][idx]
-                            with st.expander(f"#{idx+1} {' - '.join([str(row.get(c, f'客户{idx}')) for c in ([cid_col] if cid_col else [])])}  |  流失概率 {p:.1%}"):
-                                r1, r2 = st.columns(2)
-                                with r1:
-                                    st.markdown(f"- 年龄：{row.get('Age','—')} | 订阅：{row.get('Subscription_Duration_Months','—')}个月 | 登录：{row.get('Monthly_Logins','—')}次/月")
-                                    st.markdown(f"- 消费：${row.get('Monthly_Spend','—')} | 距上次购买：{row.get('Last_Purchase_Days_Ago','—')}天")
-                                with r2:
-                                    st.markdown(f"- 客服呼叫：{row.get('Customer_Support_Calls','—')}次 | App使用：{row.get('App_Usage_Time_Min','—')}分钟")
-                                    st.markdown(f"- 满意度：{row.get('Satisfaction_Score','—')}/5 | 折扣率：{row.get('Discount_Usage_Percentage','—')}")
-                                if p >= 0.7:
-                                    st.error("**建议**：专属客服回访 + 大额优惠券，48小时内联系")
-
-                    # ═══ 5️⃣ 下载 ═══
-                    csv_buf = io.BytesIO()
-                    dl = res[display_cols].copy()
-                    dl.columns = [c.replace('\n','') for c in dl.columns]
-                    dl.to_csv(csv_buf, index=False, encoding='utf-8-sig')
-                    st.download_button("📥 下载完整预测结果 (CSV)", data=csv_buf.getvalue(), file_name="churn_predictions.csv", mime="text/csv", use_container_width=True)
-
-                    st.markdown("---")
-                    st.caption("报告由 ChurnGuard AI 引擎自动生成 ｜ 基于随机森林 + SMOTE 模型，AUC=0.90")
+            st.markdown("---")
+            st.caption("报告由 ChurnGuard AI 引擎自动生成 ｜ 基于随机森林 + SMOTE 模型，AUC=0.90")
