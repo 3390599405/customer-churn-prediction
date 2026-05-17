@@ -323,6 +323,7 @@ else:
         'Discount_Usage_Percentage': ['折扣使用比例', 'Discount_Rate', 'discount_rate', '折扣率', '折扣比例', 'discount_pct'],
         'Customer_Support_Calls': ['Support_Calls', 'support_calls', '客服呼叫次数', '客服呼叫', 'customer_service_calls'],
         'Satisfaction_Score': ['满意度评分', 'Satisfaction', 'satisfaction', '满意度', 'CSAT', 'csat'],
+        'Contract_Type': ['合同类型', 'Contract_Type', 'contract_type', 'Contract', 'contract', '合同'],
         'CustomerID': ['CustomerID', 'customer_id', 'customerid', '用户ID', '客户ID', 'ID', 'id'],
     }
 
