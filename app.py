@@ -2,55 +2,37 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import plotly.express as px
 import plotly.graph_objects as go
 
 st.set_page_config(page_title="ChurnGuard", layout="wide", initial_sidebar_state="collapsed")
 
-# ── 顶部 Banner ──
+# ── CSS ──
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
     * { font-family: 'Inter', sans-serif; }
-
     .hero {
         background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-        padding: 2.5rem 2rem;
-        border-radius: 20px;
-        text-align: center;
-        color: white;
-        margin-bottom: 2rem;
+        padding: 2.5rem 2rem; border-radius: 20px; text-align: center;
+        color: white; margin-bottom: 2rem;
     }
     .hero h1 { font-size: 2.8rem; font-weight: 800; margin: 0; letter-spacing: -0.5px; }
     .hero p { font-size: 1.05rem; opacity: .75; margin-top: .5rem; }
     .card {
-        background: rgba(255,255,255,.04);
-        border: 1px solid rgba(255,255,255,.08);
-        border-radius: 14px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
+        background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+        border-radius: 14px; padding: 1.5rem; margin-bottom: 1.5rem;
         backdrop-filter: blur(4px);
     }
-    .card h3 { margin-top: 0; font-weight: 600; font-size: 1.1rem; color: #e0e0e0; }
-    .stNumberInput label, .stSelectbox label { font-weight: 500; font-size: 0.85rem; }
-
-    /* 结果卡片 */
     .result-card {
-        background: rgba(255,255,255,.04);
-        border: 1px solid rgba(255,255,255,.08);
-        border-radius: 14px;
-        padding: 1.2rem;
-        text-align: center;
+        background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+        border-radius: 14px; padding: 1.2rem; text-align: center;
         backdrop-filter: blur(4px);
     }
     .result-card .value { font-size: 2.2rem; font-weight: 800; }
     .result-card .label { font-size: .8rem; opacity: .6; text-transform: uppercase; letter-spacing: 1px; }
-
     .risk-high .value { color: #ff4757; }
     .risk-mid .value { color: #ffa502; }
     .risk-low .value { color: #2ed573; }
-
-    /* 移动端适配 */
     @media (max-width: 768px) {
         .hero { padding: 1.5rem 1rem; }
         .hero h1 { font-size: 1.8rem; }
@@ -62,7 +44,7 @@ st.markdown("""
 
 st.markdown('<div class="hero"><h1>⚡ ChurnGuard</h1><p>AI-powered customer churn prediction · Identify · Prioritize · Retain</p></div>', unsafe_allow_html=True)
 
-# ── 加载模型 ──
+# ── 加载模型 + 数据 ──
 @st.cache_resource
 def load_model():
     data = joblib.load('churn_model.pkl')
@@ -70,28 +52,14 @@ def load_model():
 
 model, scaler, feature_cols = load_model()
 
-# ── 特征重要性图表（始终显示）──
-feat_names = feature_cols.copy()
-# 把 Contract_Type_Monthly 显示为 Contract_Type
-feat_labels = [n.replace('Contract_Type_Monthly', 'Contract Type') for n in feat_names]
+@st.cache_data
+def load_data():
+    df = pd.read_csv('ecommerce_customer_churn_data.csv')
+    churned = df[df['Is_Churn'] == 1]
+    retained = df[df['Is_Churn'] == 0]
+    return df, churned, retained
 
-importances = model.feature_importances_
-imp_df = pd.DataFrame({'Feature': feat_labels, 'Importance': importances}).sort_values('Importance', ascending=True)
-
-fig_importance = px.bar(
-    imp_df, x='Importance', y='Feature', orientation='h',
-    title='What Drives Churn?',
-    text_auto='.0%',
-    color='Importance', color_continuous_scale='viridis',
-    height=400
-)
-fig_importance.update_layout(
-    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-    font=dict(size=13), margin=dict(l=10, r=10, t=40, b=10),
-    xaxis_title=None, yaxis_title=None,
-    coloraxis_showscale=False
-)
-fig_importance.update_traces(textposition='outside', cliponaxis=False)
+df, churned, retained = load_data()
 
 # ── 输入区 ──
 st.markdown('<div class="card"><h3>📋 Customer Profile</h3>', unsafe_allow_html=True)
@@ -111,9 +79,6 @@ with col3:
     contract = st.selectbox("Contract Type", ["Monthly", "Annual"])
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ── 特征重要性图 ──
-st.plotly_chart(fig_importance, use_container_width=True)
-
 # ── 预测 ──
 if st.button("🔮 Predict Churn Risk", type="primary", use_container_width=True):
     input_data = pd.DataFrame([[age, subscription, logins, last_purchase,
@@ -123,7 +88,6 @@ if st.button("🔮 Predict Churn Risk", type="primary", use_container_width=True
     scaled = scaler.transform(input_data)
     prob = model.predict_proba(scaled)[0, 1]
 
-    # 风险等级
     if prob >= 0.7:
         risk_label, risk_cls = "High Risk", "risk-high"
         risk_icon = "🔴"
@@ -148,41 +112,76 @@ if st.button("🔮 Predict Churn Risk", type="primary", use_container_width=True
     with c3:
         st.markdown(f'<div class="result-card {risk_cls}"><div class="label">Risk Level</div><div class="value">{risk_icon} {risk_label}</div></div>', unsafe_allow_html=True)
 
-    # ── 仪表盘（速度表风格）──
-    fig_gauge = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=prob * 100,
-        number={'suffix': '%', 'font': {'size': 36, 'color': '#e0e0e0'}},
-        gauge={
-            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': '#555'},
-            'bar': {'color': '#ff4757' if prob >= 0.7 else '#ffa502' if prob >= 0.3 else '#2ed573', 'thickness': 0.3},
-            'bgcolor': 'rgba(0,0,0,0)',
-            'borderwidth': 0,
-            'steps': [
-                {'range': [0, 30], 'color': 'rgba(46,213,115,.15)'},
-                {'range': [30, 70], 'color': 'rgba(255,165,2,.12)'},
-                {'range': [70, 100], 'color': 'rgba(255,71,87,.12)'}
-            ],
-            'threshold': {
-                'line': {'color': 'white', 'width': 3},
-                'thickness': 0.6,
-                'value': prob * 100
-            }
-        }
-    ))
-    fig_gauge.update_layout(
-        height=280,
-        margin=dict(l=30, r=30, t=10, b=10),
-        paper_bgcolor='rgba(0,0,0,0)',
-        font={'color': '#aaa', 'family': 'Inter'}
-    )
+    # ── 雷达图 ──
+    st.markdown("---")
+    st.markdown("### 🎯 Customer Profile vs. Market Benchmarks")
 
+    # 定义雷达指标：选取关键数值特征，统计流失/留存群体的均值
+    radar_metrics = [
+        ('Monthly Spend ($)', min(df['Monthly_Spend']), max(df['Monthly_Spend']), spending),
+        ('Subscription (months)', min(df['Subscription_Duration_Months']), max(df['Subscription_Duration_Months']), subscription),
+        ('Monthly Logins', min(df['Monthly_Logins']), max(df['Monthly_Logins']), logins),
+        ('App Usage (min)', min(df['App_Usage_Time_Min']), max(df['App_Usage_Time_Min']), app_usage),
+        ('Satisfaction Score', 1, 5, satisfaction),
+    ]
+
+    # 归一化 0-1
+    cats = []
+    this_val = []
+    avg_retained = []
+    avg_churned = []
+
+    for name, lo, hi, val in radar_metrics:
+        cats.append(name)
+        this_val.append(round((val - lo) / (hi - lo), 3))
+    for name, lo, hi, _ in radar_metrics:
+        if name == 'Satisfaction Score':
+            avg_retained.append(round((retained['Satisfaction_Score'].mean() - lo) / (hi - lo), 3))
+            avg_churned.append(round((churned['Satisfaction_Score'].mean() - lo) / (hi - lo), 3))
+        elif name == 'Monthly Spend ($)':
+            avg_retained.append(round((retained['Monthly_Spend'].mean() - lo) / (hi - lo), 3))
+            avg_churned.append(round((churned['Monthly_Spend'].mean() - lo) / (hi - lo), 3))
+        elif name == 'Subscription (months)':
+            avg_retained.append(round((retained['Subscription_Duration_Months'].mean() - lo) / (hi - lo), 3))
+            avg_churned.append(round((churned['Subscription_Duration_Months'].mean() - lo) / (hi - lo), 3))
+        elif name == 'Monthly Logins':
+            avg_retained.append(round((retained['Monthly_Logins'].mean() - lo) / (hi - lo), 3))
+            avg_churned.append(round((churned['Monthly_Logins'].mean() - lo) / (hi - lo), 3))
+        elif name == 'App Usage (min)':
+            avg_retained.append(round((retained['App_Usage_Time_Min'].mean() - lo) / (hi - lo), 3))
+            avg_churned.append(round((churned['App_Usage_Time_Min'].mean() - lo) / (hi - lo), 3))
+
+    fig_radar = go.Figure()
+    fig_radar.add_trace(go.Scatterpolar(r=this_val + [this_val[0]], theta=cats + [cats[0]],
+                                        name='This Customer', fill='toself',
+                                        line=dict(color='#7c4dff', width=2.5),
+                                        marker=dict(size=6, color='#7c4dff')))
+    fig_radar.add_trace(go.Scatterpolar(r=avg_retained + [avg_retained[0]], theta=cats + [cats[0]],
+                                        name='Retained Customers', fill='toself',
+                                        line=dict(color='#2ed573', width=2, dash='dot'),
+                                        opacity=0.7))
+    fig_radar.add_trace(go.Scatterpolar(r=avg_churned + [avg_churned[0]], theta=cats + [cats[0]],
+                                        name='Churned Customers', fill='toself',
+                                        line=dict(color='#ff4757', width=2, dash='dot'),
+                                        opacity=0.7))
+
+    fig_radar.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 1.05], tickvals=[0, .25, .5, .75, 1],
+                            tickfont=dict(size=10, color='#888')),
+            bgcolor='rgba(0,0,0,0)',
+            gridshape='circular'
+        ),
+        legend=dict(orientation='h', yanchor='bottom', y=-0.25, font=dict(size=12, color='#aaa')),
+        height=420, margin=dict(l=60, r=60, t=20, b=60),
+        paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#ccc', size=11),
+    )
+    st.plotly_chart(fig_radar, use_container_width=True)
+
+    # ── 雷达解读 ──
     gcol1, gcol2 = st.columns([1, 1])
     with gcol1:
-        st.plotly_chart(fig_gauge, use_container_width=True)
-
-    with gcol2:
-        st.markdown("#### Recommended Action")
+        st.markdown("#### 💡 Recommended Action")
         if prob >= 0.7:
             if contract == "Monthly":
                 st.error("**Priority intervention** — High-risk monthly contract client. Assign dedicated support + substantial discount offer.")
@@ -193,7 +192,18 @@ if st.button("🔮 Predict Churn Risk", type="primary", use_container_width=True
         else:
             st.success("**Routine maintenance** — Keep current satisfaction levels. No urgent action needed.")
 
-        st.markdown("#### Key Drivers")
-        top3 = imp_df.tail(3)
-        for _, r in top3.iterrows():
-            st.markdown(f"- **{r['Feature']}** — {r['Importance']:.1%} contribution")
+    with gcol2:
+        st.markdown("#### 🔍 Key Insights")
+        # 找出客户偏离最大的指标
+        diffs = []
+        for i, name in enumerate([m[0] for m in radar_metrics]):
+            d = this_val[i] - avg_retained[i]
+            diffs.append((name, d))
+        diffs.sort(key=lambda x: x[1])
+        worst = diffs[0]
+        if worst[1] < -0.08:
+            st.markdown(f"- ⚠️ **{worst[0]}** is significantly below retained customers")
+        best = diffs[-1]
+        if best[1] > 0.08:
+            st.markdown(f"- ✅ **{best[0]}** is above average — good sign")
+        st.markdown(f"- 📊 Customer scores **{max(0, min(100, int((1 - prob) * 100)))}/100** vs. retained baseline")
