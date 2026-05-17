@@ -390,6 +390,9 @@ else:
             scaled = scaler.transform(fd)
             probs = model.predict_proba(scaled)[:, 1]
 
+            # 将 proc 列名重命名为标准化特征名（供后续报告使用）
+            proc.rename(columns={src: feat for feat, src in auto_map.items() if src in proc.columns}, inplace=True)
+
             # 构建结果
             res = pd.DataFrame()
             if cid_col: res['客户ID'] = proc[cid_col]
