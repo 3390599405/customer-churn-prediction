@@ -393,7 +393,7 @@ else:
             # 构建结果
             res = pd.DataFrame()
             if cid_col: res['客户ID'] = proc[cid_col]
-            res['流失概率'] = (probs * 100).round(1).apply(lambda x: f"{x:.1f}%")
+            res['流失概率'] = [f"{x:.1f}%" for x in (probs * 100).round(1)]
             res['风险等级'] = np.where(probs >= 0.7, '🔴 高风险', np.where(probs >= 0.3, '🟡 中风险', '🟢 低风险'))
             res['健康度'] = ((1 - probs) * 100).astype(int)
             res['风险排序'] = probs
