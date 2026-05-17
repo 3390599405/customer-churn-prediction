@@ -180,7 +180,6 @@ if mode == "单客户预测":
         # 2️⃣ 指标对比
         st.markdown("### 2️⃣ 关键指标对比分析")
         st.markdown("将当前客户的关键指标与**留存客户均值**和**流失客户均值**进行对比，识别异常信号。")
-        clr = {"正常": "badge-green", "偏低": "badge-red", "偏短": "badge-red", "偏少": "badge-red", "偏高": "badge-red", "偏长": "badge-red", "月合同": "badge-red", "年合同": "badge-green"}
         def sts(v): return "偏低" if v < retained['Monthly_Spend'].mean() * 0.7 else "正常"
         def sts2(v): return "偏短" if v < retained['Subscription_Duration_Months'].mean() * 0.7 else "正常"
         def sts3(v): return "偏低" if v < retained['Monthly_Logins'].mean() * 0.7 else "正常"
@@ -201,9 +200,11 @@ if mode == "单客户预测":
             ("📅 距上次购买", f"{last_purchase}天", f"{retained['Last_Purchase_Days_Ago'].mean():.0f}天", f"{churned['Last_Purchase_Days_Ago'].mean():.0f}天", sts8(last_purchase)),
             ("📄 合同类型", "月合同" if contract_val else "年合同", "—", "—", "月合同" if contract_val else "年合同"),
         ]
-        html = "<table><thead><tr><th>指标</th><th>当前客户</th><th>留存客户均值</th><th>流失客户均值</th><th>状态</th></tr></thead><tbody>"
+        badge_cls_map = {"正常": "badge-green", "偏低": "badge-red", "偏短": "badge-red", "偏少": "badge-red", "偏高": "badge-red", "偏长": "badge-red", "月合同": "badge-red", "年合同": "badge-green"}
+        html = '<table><thead><tr><th>指标</th><th>当前客户</th><th>留存客户均值</th><th>流失客户均值</th><th>状态</th></tr></thead><tbody>'
         for r in metrics_table:
-            html += f"<tr><td>{r[0]}</td><td><strong>{r[1]}</strong></td><td>{r[2]}</td><td>{r[3]}</td><td><span class='badge {clr.get(r[4],"badge-amber")}'>{r[4]}</span></td></tr>"
+            bc = badge_cls_map.get(r[4], "badge-amber")
+            html += f'<tr><td>{r[0]}</td><td><strong>{r[1]}</strong></td><td>{r[2]}</td><td>{r[3]}</td><td><span class="badge {bc}">{r[4]}</span></td></tr>'
         html += "</tbody></table>"
         st.markdown(html, unsafe_allow_html=True)
 
